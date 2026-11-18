@@ -16,8 +16,16 @@ public class WorkingDaysTests
     public void End_before_start_counts_zero() =>
         Assert.Equal(0, WorkingDays.Count(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 16)));
 
-    // Known bug in the starter: leave that spans a weekend must not count Saturday and Sunday (POL-01).
+    // Leave that spans a weekend must not count Saturday and Sunday (POL-01).
     [Fact]
     public void Friday_to_Monday_counts_two_working_days() =>
         Assert.Equal(2, WorkingDays.Count(new DateOnly(2026, 11, 20), new DateOnly(2026, 11, 23)));
+
+    [Fact]
+    public void Saturday_to_Sunday_counts_zero() =>
+        Assert.Equal(0, WorkingDays.Count(new DateOnly(2026, 11, 21), new DateOnly(2026, 11, 22)));
+
+    [Fact]
+    public void Two_full_weeks_count_ten() =>
+        Assert.Equal(10, WorkingDays.Count(new DateOnly(2026, 11, 16), new DateOnly(2026, 11, 29)));
 }

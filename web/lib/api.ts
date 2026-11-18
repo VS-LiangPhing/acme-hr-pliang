@@ -26,8 +26,15 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type Employee = { id: number; name: string; email: string; department: string; managerId: number | null; annualEntitlement: number; roles?: string[] };
-export type LeaveRequest = { id: number; employeeId: number; startDate: string; endDate: string; halfDay: "None" | "AM" | "PM"; status: "Pending" | "Approved" | "Rejected"; reason: string };
+export type HalfDay = "None" | "AM" | "PM";
+export type LeaveRequest = { id: number; employeeId: number; startDate: string; endDate: string; halfDay: HalfDay; status: "Pending" | "Approved" | "Rejected"; reason: string; days: number };
 export type Balance = { employeeId: number; entitlement: number; used: number; pending: number; available: number };
+export type NewLeave = { startDate: string; endDate: string; halfDay: HalfDay; reason: string };
+
+export const listLeave = () => api<LeaveRequest[]>("/leave");
+export const getBalance = (employeeId: number) => api<Balance>(`/employees/${employeeId}/balance`);
+export const createLeave = (body: NewLeave) => api<LeaveRequest>("/leave", { method: "POST", body: JSON.stringify(body) });
+export const decideLeave = (id: number, decision: "approve" | "reject") => api<LeaveRequest>(`/leave/${id}/${decision}`, { method: "POST" });
 
 // Sign-in: email + password against the API's built-in ASP.NET Core Identity endpoints.
 // The bearer token and the signed-in employee are kept in this browser only.

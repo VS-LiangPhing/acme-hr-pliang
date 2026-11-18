@@ -45,15 +45,35 @@ public class LeaveController(LeaveService leave, AccessService access) : Control
     {
         if (employeeId is int id)
             return await access.CanSeeEmployeeAsync(User, id)
-                ? Ok(await leave.ListAsync(id))
+                ? Ok((await leave.ListAsync(id)).Select(LeaveService.ToView))
                 : Problem(statusCode: 403, title: "You can only see your own or your team's leave");
         var visible = await access.VisibleEmployeeIdsAsync(User);
-        return Ok((await leave.ListAsync(null)).Where(r => visible is null || visible.Contains(r.EmployeeId)));
+        return Ok((await leave.ListAsync(null)).Where(r => visible is null || visible.Contains(r.EmployeeId)).Select(LeaveService.ToView));
     }
 
-    // TODO (Lab 1): POST /leave, POST /leave/{id}/approve, POST /leave/{id}/reject
-    // The employee is the signed-in user (User.EmployeeId()), never an id from the body.
-    // Approve and reject only when access.CanDecideLeaveAsync(User, request) is true, otherwise 403.
+    /// <summary>Request leave for yourself. Up to 3 working days is approved at once; more waits for your manager.</summary>
+    [HttpPost]
+    public async Task<IActionResult> Create(CreateLeave body)
+    {
+        var res = await leave.CreateAsync(User.EmployeeId(), body);
+        return res.Error is { } error ? Problem(statusCode: 400, title: error) : Created($"/leave/{res.Value!.Id}", res.Value);
+    }
+
+    [HttpPost("{id:int}/approve")]
+    public Task<IActionResult> Approve(int id) => Decide(id, approve: true);
+
+    [HttpPost("{id:int}/reject")]
+    public Task<IActionResult> Reject(int id) => Decide(id, approve: false);
+
+    // Order: unknown → 404, not allowed → 403, then rule checks → 400. Outsiders learn nothing about the request.
+    async Task<IActionResult> Decide(int id, bool approve)
+    {
+        if (await leave.FindAsync(id) is not { } request) return Problem(statusCode: 404, title: $"Leave request {id} not found");
+        if (!await access.CanDecideLeaveAsync(User, request))
+            return Problem(statusCode: 403, title: "Only the requester's manager or HR can decide, and never on their own request");
+        var res = await leave.DecideAsync(request, approve);
+        return res.Error is { } error ? Problem(statusCode: 400, title: error) : Ok(res.Value);
+    }
 }
 
 [ApiController, Route("policies")]
