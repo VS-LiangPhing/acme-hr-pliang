@@ -49,10 +49,23 @@ public class HelpdeskTools(AcmeDb db, LeaveService leave)
         var end = DateOnly.ParseExact(Get(input, "end_date"), "yyyy-MM-dd");
         var half = Enum.TryParse<HalfDay>(Get(input, "half_day"), true, out var h) ? h : HalfDay.None;
         var request = await leave.CreateAsync(new CreateLeave(employeeId, start, end, half, Get(input, "reason")));
+        var days = LeaveService.DaysOf(request);
 
-        // TODO (Lab 2): the approval rule belongs here, in code, not in the prompt (POL-02, POL-14).
-        // More than 3 working days must return status "needs_manager_approval" (the request stays Pending for the manager).
-        return Ok(new { status = request.Status.ToString().ToLowerInvariant(), request_id = request.Id, days = LeaveService.DaysOf(request) });
+        // The approval rule lives here, in code, not in the prompt (POL-02, POL-14):
+        // more than 3 working days is never approved by the agent. It stays Pending for the manager.
+        if (days > LeaveService.AutoApproveMaxDays)
+        {
+            if (request.Status != LeaveStatus.Pending)
+                throw new InvalidOperationException($"Leave request {request.Id} has {days} days but is {request.Status}: it must wait for the manager.");
+            return Ok(new
+            {
+                status = "needs_manager_approval",
+                request_id = request.Id,
+                days,
+                message = $"More than {LeaveService.AutoApproveMaxDays} working days: sent to the employee's manager. It is not approved yet.",
+            });
+        }
+        return Ok(new { status = request.Status.ToString().ToLowerInvariant(), request_id = request.Id, days });
     }
 
     async Task<ToolOutcome> CheckPolicyAsync(string topic)
