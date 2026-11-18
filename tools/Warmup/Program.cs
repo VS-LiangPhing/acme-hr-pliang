@@ -22,7 +22,10 @@ AnthropicClient client = new(); // reads ANTHROPIC_API_KEY
 List<ToolUnion> tools =
 [
     Def("get_leave_balance", "Get the annual leave balance of the current employee, in working days.", new { }),
-    // TODO (warm-up): add get_public_holidays(state) here and in RunTool below.
+    Def("get_public_holidays",
+        "Get the 2026 public holidays for one Malaysian state. Use the state code: SEL (Selangor), KUL (Kuala Lumpur), PNG (Penang).",
+        new { state = new { type = "string", description = "State code, for example KUL for Kuala Lumpur." } },
+        "state"),
 ];
 
 var history = new List<MessageParam> { new UserMessageParam { Content = question } };
@@ -64,8 +67,38 @@ Console.WriteLine("Stopped: turn limit reached.");
 static (string Output, bool IsError) RunTool(string name, IReadOnlyDictionary<string, JsonElement> input) => name switch
 {
     "get_leave_balance" => ("""{"entitlement":16,"used":5.5,"pending":2,"available":8.5}""", false),
+    "get_public_holidays" => PublicHolidays(input),
     _ => ($"Unknown tool {name}.", true),
 };
+
+// Fake training data: a short sample of 2026 holidays, not an official calendar.
+static (string Output, bool IsError) PublicHolidays(IReadOnlyDictionary<string, JsonElement> input)
+{
+    var state = input.TryGetValue("state", out var s) && s.ValueKind == JsonValueKind.String
+        ? s.GetString()!.Trim().ToUpperInvariant() : "";
+    (string Date, string Name)[] national =
+    [
+        ("2026-01-01", "New Year's Day"),
+        ("2026-02-17", "Chinese New Year"),
+        ("2026-02-18", "Chinese New Year (second day)"),
+        ("2026-03-21", "Hari Raya Aidilfitri"),
+        ("2026-05-01", "Labour Day"),
+        ("2026-08-31", "National Day"),
+        ("2026-09-16", "Malaysia Day"),
+        ("2026-12-25", "Christmas Day"),
+    ];
+    (string Date, string Name)[]? local = state switch
+    {
+        "SEL" => [("2026-02-01", "Thaipusam"), ("2026-12-11", "Sultan of Selangor's Birthday")],
+        "KUL" => [("2026-02-01", "Federal Territory Day"), ("2026-02-01", "Thaipusam")],
+        "PNG" => [("2026-02-01", "Thaipusam"), ("2026-07-07", "George Town World Heritage City Day")],
+        _ => null,
+    };
+    if (local is null)
+        return ($"No holiday data for state '{state}'. Use SEL, KUL or PNG.", true);
+    var list = national.Concat(local).OrderBy(h => h.Date).Select(h => new { date = h.Date, name = h.Name });
+    return (JsonSerializer.Serialize(new { state, year = 2026, holidays = list }), false);
+}
 
 static ToolUnion Def(string name, string description, object properties, params string[] required) => new Tool
 {
