@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Api.Services;
 
 public record LeaveBalance(int EmployeeId, decimal Entitlement, decimal Used, decimal Pending, decimal Available);
+public record TeamLeaveSummary(int ManagerId, int? Year, int DirectReports, decimal DaysTaken);
 public record CreateLeave(int EmployeeId, DateOnly StartDate, DateOnly EndDate, HalfDay HalfDay = HalfDay.None, string Reason = "");
 
 public class LeaveException(string message) : Exception(message);
@@ -25,6 +26,26 @@ public class LeaveService(AcmeDb db)
         var used = requests.Where(r => r.Status == LeaveStatus.Approved).Sum(DaysOf);
         var pending = requests.Where(r => r.Status == LeaveStatus.Pending).Sum(DaysOf);
         return new LeaveBalance(employeeId, emp.AnnualEntitlement, used, pending, emp.AnnualEntitlement - used - pending);
+    }
+
+    /// <summary>Approved leave days of the manager's direct reports. With a year, only working days inside that year count.</summary>
+    public async Task<TeamLeaveSummary> TeamSummaryAsync(int managerId, int? year)
+    {
+        if (year is < 2000 or > 2100) throw new LeaveException("Year must be between 2000 and 2100.");
+        var reports = await db.Employees.Where(e => e.ManagerId == managerId).Select(e => e.Id).ToListAsync();
+        var approved = await db.LeaveRequests
+            .Where(r => reports.Contains(r.EmployeeId) && r.Status == LeaveStatus.Approved)
+            .ToListAsync();
+        var days = approved.Sum(r => year is int y ? DaysIn(r, y) : DaysOf(r));
+        return new TeamLeaveSummary(managerId, year, reports.Count, days);
+    }
+
+    static decimal DaysIn(LeaveRequest r, int year)
+    {
+        var start = r.StartDate < new DateOnly(year, 1, 1) ? new DateOnly(year, 1, 1) : r.StartDate;
+        var end = r.EndDate > new DateOnly(year, 12, 31) ? new DateOnly(year, 12, 31) : r.EndDate;
+        if (end < start) return 0;
+        return r.HalfDay == HalfDay.None ? WorkingDays.Count(start, end) : 0.5m;
     }
 
     public Task<List<LeaveRequest>> ListAsync(int? employeeId) =>

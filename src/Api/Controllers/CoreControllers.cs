@@ -55,6 +55,15 @@ public class LeaveController(LeaveService leave, AccessService access) : Control
         return Ok((await leave.ListAsync(null)).Where(r => visible is null || visible.Contains(r.EmployeeId)));
     }
 
+    /// <summary>Managers only: total approved leave days taken by the signed-in manager's direct reports. Optional year.</summary>
+    [HttpGet("team-summary")]
+    public async Task<IActionResult> TeamSummary([FromQuery] int? year)
+    {
+        if (!AccessService.CanSeeTeamSummary(User)) return Problem(statusCode: 403, title: "Only managers can see their team's leave summary");
+        try { return Ok(await leave.TeamSummaryAsync(User.EmployeeId(), year)); }
+        catch (LeaveException e) { return Problem(statusCode: 400, title: "Team summary query not valid", detail: e.Message); }
+    }
+
     /// <summary>Leave for the signed-in employee. The body has no employeeId: who asks comes from the token.</summary>
     [HttpPost]
     public Task<IActionResult> Create(NewLeave body) =>

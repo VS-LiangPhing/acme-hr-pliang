@@ -35,6 +35,9 @@ public class AccessService(AcmeDb db)
         return user.IsInRole(Roles.HR) || await IsDirectReportAsync(me, request.EmployeeId);
     }
 
+    /// <summary>Team totals (e.g. leave taken by direct reports): managers only.</summary>
+    public static bool CanSeeTeamSummary(ClaimsPrincipal user) => user.IsInRole(Roles.Manager);
+
     /// <summary>Employee ids this user may see. Null means everyone (HR).</summary>
     public async Task<List<int>?> VisibleEmployeeIdsAsync(ClaimsPrincipal user)
     {

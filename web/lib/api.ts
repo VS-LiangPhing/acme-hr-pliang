@@ -25,7 +25,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
-export type Employee = { id: number; name: string; email: string; department: string; managerId: number | null; annualEntitlement: number; roles?: string[] };
+export type Employee = { id: number; name: string; email: string; department: string; managerId: number | null; managerName?: string | null; annualEntitlement: number; roles?: string[] };
 export type LeaveRequest = { id: number; employeeId: number; startDate: string; endDate: string; halfDay: "None" | "AM" | "PM"; days: number; status: "Pending" | "Approved" | "Rejected"; reason: string };
 export type Balance = { employeeId: number; entitlement: number; used: number; pending: number; available: number };
 
