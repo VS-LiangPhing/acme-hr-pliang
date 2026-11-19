@@ -65,28 +65,64 @@ public class DocumentExtractor(IClaudeChat claude, ClaudeOptions options)
         },
     };
 
+    /// <summary>
+    /// The schema fixes the shape; <see cref="DocumentValidator"/> checks the meaning in C#. One retry with the exact
+    /// problems, at most <see cref="MaxAttempts"/> calls. Anything not cleanly valid goes to a person as NeedsReview.
+    /// </summary>
     public async Task<ExtractionResult> ExtractAsync(byte[] pdf, CancellationToken ct = default)
     {
         var history = new List<MessageParam> { DocumentMessage(pdf) };
+        Extraction? data = null;
+        List<string> problems = [];
 
-        // TODO (Lab 6): this first version trusts whatever comes back. Make it safe:
-        //  1. Send OutputConfig = new OutputConfig { Format = new JsonOutputFormat { Schema = Schema } }.
-        //  2. Handle a stop_reason other than end_turn: return NeedsReview.
-        //  3. Parse the text into Extraction (catch JsonException) and run DocumentValidator.Check.
-        //  4. If there are problems, retry ONCE: add Claude's answer and the exact problems to history.
-        //     Say "correct only reading mistakes; if the document itself is wrong, keep its values as written".
-        //     Otherwise Claude may "fix" a wrong document (samples 08, 10, 17) so the checks pass.
-        //  5. Still failing, or kind "other": return NeedsReview with the problems. Max MaxAttempts calls.
-        var res = await claude.SendAsync(new MessageCreateParams
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            Model = options.Model,
-            MaxTokens = 1024,
-            System = Prompt,
-            Messages = history.ToList(),
-        }, ct);
+            var res = await claude.SendAsync(new MessageCreateParams
+            {
+                Model = options.Model,
+                MaxTokens = 1024,
+                System = Prompt,
+                Messages = history.ToList(), // a copy: each request keeps the history it was sent with
+                OutputConfig = new OutputConfig { Format = new JsonOutputFormat { Schema = Schema } },
+            }, ct);
 
-        var text = string.Concat(res.Content.Select(b => b.TryPickText(out var t) ? t.Text : ""));
-        var data = JsonSerializer.Deserialize<Extraction>(text);
-        return new ExtractionResult(data, DocumentStatus.Valid, [], 1);
+            // Cut off (max_tokens), refused, or anything else unexpected: never trust or retry a partial answer.
+            if (res.StopReason != StopReason.EndTurn)
+                return new ExtractionResult(data, DocumentStatus.NeedsReview,
+                    [$"Claude stopped with stop_reason {res.StopReason?.Raw() ?? "unknown"} instead of end_turn"], attempt);
+
+            var text = string.Concat(res.Content.Select(b => b.TryPickText(out var t) ? t.Text : ""));
+            (data, problems) = ParseAndCheck(text);
+
+            if (problems.Count == 0) return new ExtractionResult(data, DocumentStatus.Valid, [], attempt);
+            if (data?.Kind == "other") return new ExtractionResult(data, DocumentStatus.NeedsReview, problems, attempt); // nothing to correct
+            if (attempt == MaxAttempts) break;
+
+            history.Add(new AssistantMessageParam { Content = text });
+            history.Add(new UserMessageParam { Content = RetryMessage(problems) });
+        }
+
+        return new ExtractionResult(data, DocumentStatus.NeedsReview, problems, MaxAttempts);
     }
+
+    /// <summary>Parse Claude's text into <see cref="Extraction"/> and run the business rules. Bad JSON is a problem, not a crash.</summary>
+    static (Extraction? Data, List<string> Problems) ParseAndCheck(string text)
+    {
+        Extraction? data;
+        try { data = JsonSerializer.Deserialize<Extraction>(text); }
+        catch (JsonException e) { return (null, [$"the answer is not valid JSON for the schema: {e.Message}"]); }
+        if (data is null) return (null, ["the answer is not valid JSON for the schema: it is empty or null"]);
+        return (data, DocumentValidator.Check(data));
+    }
+
+    /// <summary>
+    /// The retry ask: the exact problems, and a firm rule not to "fix" the document itself. A document that is wrong
+    /// on paper (samples 08, 10, 17) must keep its values and fail again, so it reaches a person.
+    /// </summary>
+    static string RetryMessage(List<string> problems) =>
+        "Your answer failed these checks:\n" +
+        string.Join("\n", problems.Select(p => $"- {p}")) +
+        "\n\nLook at the document again and answer again with the same JSON shape. " +
+        "When you answer, correct only reading mistakes; if the document itself is wrong, keep its values as written. " +
+        "Do not change a value just to make these checks pass.";
 }

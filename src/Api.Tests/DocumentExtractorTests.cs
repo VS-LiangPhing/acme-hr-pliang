@@ -67,6 +67,85 @@ public class DocumentExtractorTests
         Assert.Equal(DocumentStatus.Valid, r.Status);
         Assert.Equal(106.00m, r.Data!.ExpenseClaim!.Total);
     }
+
+    [Fact]
+    public async Task Max_tokens_stop_is_NeedsReview_without_parsing_or_retry()
+    {
+        // Even a complete-looking answer is not trusted when Claude was cut off.
+        var fake = new FakeClaude(FakeClaude.Text(GoodMc, "max_tokens"), FakeClaude.Text(GoodMc));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal(DocumentStatus.NeedsReview, r.Status);
+        Assert.Single(fake.Requests);
+        Assert.Equal(1, r.Attempts);
+        Assert.Contains(r.Problems, p => p.Contains("max_tokens"));
+    }
+
+    [Fact]
+    public async Task Refusal_stop_is_NeedsReview()
+    {
+        var fake = new FakeClaude(FakeClaude.Text("", "refusal"));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal(DocumentStatus.NeedsReview, r.Status);
+        Assert.Single(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Max_tokens_on_the_retry_is_NeedsReview_after_two_calls()
+    {
+        var fake = new FakeClaude(FakeClaude.Text(BadMc), FakeClaude.Text(GoodMc, "max_tokens"));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal(DocumentStatus.NeedsReview, r.Status);
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal(2, r.Attempts);
+    }
+
+    [Fact]
+    public async Task Retry_sends_Claudes_answer_the_exact_problems_and_keep_as_written()
+    {
+        var fake = new FakeClaude(FakeClaude.Text(BadMc), FakeClaude.Text(GoodMc));
+        await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+
+        var retry = fake.Requests[1];
+        Assert.Equal("assistant", FakeClaude.MessageJson(retry, 1).GetProperty("role").GetString());
+        Assert.Contains("\"days\":3", FakeClaude.MessageJson(retry, 1).GetRawText().Replace("\\u0022", "\"").Replace("\\\"", "\""));
+
+        var ask = FakeClaude.MessageJson(retry, 2);
+        Assert.Equal("user", ask.GetProperty("role").GetString());
+        var text = ask.GetRawText();
+        Assert.Contains("days is 3 but the date range is 2 days", text); // the exact validator problem
+        Assert.Contains("correct only reading mistakes", text);
+        Assert.Contains("if the document itself is wrong, keep its values as written", text);
+        Assert.NotNull(retry.OutputConfig); // the retry is held to the schema too
+    }
+
+    [Fact]
+    public async Task Not_json_retries_once_then_stops()
+    {
+        var fake = new FakeClaude(FakeClaude.Text("sorry"), FakeClaude.Text("still not json"), FakeClaude.Text(GoodMc));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal(DocumentStatus.NeedsReview, r.Status);
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Null(r.Data);
+        Assert.Contains(r.Problems, p => p.Contains("JSON"));
+    }
+
+    [Fact]
+    public async Task Other_document_reports_why_it_needs_review()
+    {
+        var fake = new FakeClaude(FakeClaude.Text("""{"kind":"other","medical_certificate":null,"expense_claim":null}"""));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal("other", r.Data!.Kind);
+        Assert.Contains(r.Problems, p => p.Contains("not a medical certificate or expense claim"));
+    }
+
+    [Fact]
+    public async Task Fixed_on_retry_returns_the_corrected_data()
+    {
+        var fake = new FakeClaude(FakeClaude.Text(BadMc), FakeClaude.Text(GoodMc));
+        var r = await new DocumentExtractor(fake, Opts).ExtractAsync(Pdf);
+        Assert.Equal(2, r.Data!.MedicalCertificate!.Days);
+        Assert.Empty(r.Problems);
+    }
 }
 
 public class DocumentPdfTests
