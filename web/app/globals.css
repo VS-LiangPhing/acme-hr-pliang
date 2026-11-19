@@ -16,4 +16,15 @@ input, select, textarea { padding: 8px; border: 2px solid var(--ink); border-rad
 .login label { display: grid; gap: 4px; font-weight: 600; }
 .hint { font-size: 0.9em; opacity: 0.8; }
 .whoami { text-align: right; margin-bottom: 12px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cal-head h2 { margin: 0; }
+table.cal { table-layout: fixed; margin-top: 12px; }
+table.cal th { text-align: center; }
+table.cal td { vertical-align: top; height: 88px; border: 1px solid #ddd; padding: 4px 6px; font-size: 0.85em; overflow-wrap: anywhere; }
+table.cal td.weekend { background: #F4F4EF; }
+table.cal td.out { opacity: 0.45; }
+table.cal td.today { outline: 3px solid var(--sun); outline-offset: -3px; }
+.cal-day { font-weight: 700; margin-bottom: 2px; }
+.cal-entry { line-height: 1.3; }
+.pending { color: #8A8A8A; }
 button.link { background: none; border: none; padding: 0; color: var(--ink); text-decoration: underline; font-weight: 600; }
